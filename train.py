@@ -13,14 +13,16 @@ from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from utils import DrawLine
 
 parser = argparse.ArgumentParser(description='Train a PPO agent for the CarRacing-v0')
+parser.add_argument('--max_episode_steps', type=int, default=1000, metavar='N', help='maximum number of steps in an episode (default: 1000)')
 parser.add_argument('--gamma', type=float, default=0.99, metavar='G', help='discount factor (default: 0.99)')
+parser.add_argument('--lambda_', type=float, default=0.15, metavar='G', help='GAE lambda factor (default: 0.15)')
 parser.add_argument('--action-repeat', type=int, default=8, metavar='N', help='repeat action in N frames (default: 8)')
 parser.add_argument('--img-stack', type=int, default=4, metavar='N', help='stack N image in a state (default: 4)')
 parser.add_argument('--seed', type=int, default=0, metavar='N', help='random seed (default: 0)')
 parser.add_argument('--render', action='store_true', help='render the environment')
 parser.add_argument('--vis', action='store_true', help='use visdom')
 parser.add_argument(
-    '--log-interval', type=int, default=10, metavar='N', help='interval between training status logs (default: 10)')
+    '--log-interval', type=int, default=1, metavar='N', help='interval between training status logs (default: 1)')
 args = parser.parse_args()
 
 use_cuda = torch.cuda.is_available()
@@ -30,7 +32,7 @@ if use_cuda:
     torch.cuda.manual_seed(args.seed)
 
 transition = np.dtype([('s', np.float64, (args.img_stack, 96, 96)), ('a', np.float64, (3,)), ('a_logp', np.float64),
-                       ('r', np.float64), ('s_', np.float64, (args.img_stack, 96, 96))])
+                       ('r', np.float64), ('s_', np.float64, (args.img_stack, 96, 96)), ('die', np.int32), ('done', np.int32)])
 
 class Env():
     """
@@ -38,9 +40,10 @@ class Env():
     """
 
     def __init__(self):
-        self.env = NormalizeObservation(GrayscaleObservation(gym.make('CarRacing-v3', continuous=True)))
+        self.env = NormalizeObservation(GrayscaleObservation(gym.make('CarRacing-v3', continuous=True, max_episode_steps=args.max_episode_steps)))
         spec = gym.spec('CarRacing-v3')
         self.reward_threshold = spec.reward_threshold if spec.reward_threshold else float('inf')
+        self.max_episode_steps = spec.max_episode_steps if spec.max_episode_steps else float('inf')
 
     def reset(self):
         self.counter = 0
@@ -62,7 +65,7 @@ class Env():
 
             total_reward += reward
             # if no reward recently, end the episode
-            done = True if self.av_r(reward) <= -0.1 else False
+            done = True if self.av_r(reward) <= -0.1 or trunc else False
             if done or die:
                 break
         self.stack.pop(0)
@@ -141,8 +144,8 @@ class Agent():
     max_grad_norm = 0.5
     clip_param = 0.1  # epsilon in clipped loss
     ppo_epoch = 10
-    buffer_capacity, batch_size = 2000, 128
-
+    buffer_capacity = 2000
+    batch_size = 128
     def __init__(self):
         self.training_step = 0
         self.net = Net().double().to(device)
@@ -164,7 +167,7 @@ class Agent():
         return action, a_logp
 
     def save_param(self):
-        torch.save(self.net.state_dict(), 'param/ppo_net_params.pkl')
+        torch.save(self.net.state_dict(), 'param/ppo_net_params_gae.pkl')
 
     def store(self, transition):
         self.buffer[self.counter] = transition
@@ -182,13 +185,23 @@ class Agent():
         a = torch.tensor(self.buffer['a'], dtype=torch.double).to(device)
         r = torch.tensor(self.buffer['r'], dtype=torch.double).to(device).view(-1, 1)
         s_ = torch.tensor(self.buffer['s_'], dtype=torch.double).to(device)
+        die = torch.tensor(self.buffer['die'], dtype=torch.int32).to(device).view(-1, 1)
+        done = torch.tensor(self.buffer['done'], dtype=torch.int32).to(device).view(-1, 1)
 
         old_a_logp = torch.tensor(self.buffer['a_logp'], dtype=torch.double).to(device).view(-1, 1)
-
+        adv = torch.zeros(r.shape, dtype=torch.double).to(device)
+        T=len(r)
         with torch.no_grad():
-            target_v = r + args.gamma * self.net(s_)[1]
-            adv = target_v - self.net(s)[1]
-            # adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+            v = self.net(s)[1]
+            v_next = self.net(s_)[1]
+            not_die = 1 # (1 - die) normally, we would penalize the value of the next state if the current state is die, but the original author of this fork didn't penalize and it worked well. So we will keep it as 1.
+            target_v = r + args.gamma * v_next * not_die
+            delta = target_v - v
+        
+        gae = 0
+        for t in reversed(range(T)):
+            gae = delta[t] + args.gamma * args.lambda_ * gae * (1 - die[t]) * (1 - done[t]) # if a state is die or done, then reset gae = delta[t] + 0
+            adv[t] = gae
 
         for _ in range(self.ppo_epoch):
             for index in BatchSampler(SubsetRandomSampler(range(self.buffer_capacity)), self.batch_size, False):
@@ -223,12 +236,12 @@ if __name__ == "__main__":
         score = 0
         state = env.reset()
 
-        for t in range(1000):
+        for t in range(args.max_episode_steps): # max number of steps in an episode
             action, a_logp = agent.select_action(state)
             state_, reward, done, die = env.step(action * np.array([2., 1., 1.]) + np.array([-1., 0., 0.]))
             if args.render:
                 env.render()
-            if agent.store((state, action, a_logp, reward, state_)):
+            if agent.store((state, action, a_logp, reward, state_, die, done)):
                 print('updating')
                 agent.update()
             score += reward
