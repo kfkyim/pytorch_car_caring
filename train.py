@@ -2,7 +2,8 @@ import argparse
 
 import numpy as np
 
-import gym
+import gymnasium as gym
+from gymnasium.wrappers import GrayscaleObservation, NormalizeObservation 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -31,59 +32,46 @@ if use_cuda:
 transition = np.dtype([('s', np.float64, (args.img_stack, 96, 96)), ('a', np.float64, (3,)), ('a_logp', np.float64),
                        ('r', np.float64), ('s_', np.float64, (args.img_stack, 96, 96))])
 
-
 class Env():
     """
     Environment wrapper for CarRacing 
     """
 
     def __init__(self):
-        self.env = gym.make('CarRacing-v0')
-        self.env.seed(args.seed)
-        self.reward_threshold = self.env.spec.reward_threshold
+        self.env = NormalizeObservation(GrayscaleObservation(gym.make('CarRacing-v3', continuous=True)))
+        spec = gym.spec('CarRacing-v3')
+        self.reward_threshold = spec.reward_threshold if spec.reward_threshold else float('inf')
 
     def reset(self):
         self.counter = 0
         self.av_r = self.reward_memory()
 
         self.die = False
-        img_rgb = self.env.reset()
-        img_gray = self.rgb2gray(img_rgb)
-        self.stack = [img_gray] * args.img_stack  # four frames for decision
+        observation, _ = self.env.reset(seed=args.seed)
+        self.stack = [np.array(observation)] * args.img_stack  # four frames for decision
         return np.array(self.stack)
 
     def step(self, action):
         total_reward = 0
         for i in range(args.action_repeat):
-            img_rgb, reward, die, _ = self.env.step(action)
+            observation, reward, die, trunc, _ = self.env.step(action)
+            reward = float(reward)
             # don't penalize "die state"
             if die:
                 reward += 100
-            # green penalty
-            if np.mean(img_rgb[:, :, 1]) > 185.0:
-                reward -= 0.05
+
             total_reward += reward
             # if no reward recently, end the episode
             done = True if self.av_r(reward) <= -0.1 else False
             if done or die:
                 break
-        img_gray = self.rgb2gray(img_rgb)
         self.stack.pop(0)
-        self.stack.append(img_gray)
+        self.stack.append(np.array(observation))
         assert len(self.stack) == args.img_stack
         return np.array(self.stack), total_reward, done, die
 
     def render(self, *arg):
         self.env.render(*arg)
-
-    @staticmethod
-    def rgb2gray(rgb, norm=True):
-        # rgb image -> gray [0, 1]
-        gray = np.dot(rgb[..., :], [0.299, 0.587, 0.114])
-        if norm:
-            # normalize
-            gray = gray / 128. - 1.
-        return gray
 
     @staticmethod
     def reward_memory():
@@ -132,7 +120,8 @@ class Net(nn.Module):
     def _weights_init(m):
         if isinstance(m, nn.Conv2d):
             nn.init.xavier_uniform_(m.weight, gain=nn.init.calculate_gain('relu'))
-            nn.init.constant_(m.bias, 0.1)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0.1)
 
     def forward(self, x):
         x = self.cnn_base(x)
