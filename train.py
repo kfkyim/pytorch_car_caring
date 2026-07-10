@@ -30,7 +30,9 @@ device = torch.device("cuda" if use_cuda else "cpu")
 torch.manual_seed(args.seed)
 if use_cuda:
     torch.cuda.manual_seed(args.seed)
-
+    torch.backends.cudnn.deterministic = True   # force cuDNN to pick a deterministic algorithm
+    torch.backends.cudnn.benchmark = False       # prevents the auto-tuner from overriding that choice and selecting a nondeterministic algorithm that would be faster
+    
 transition = np.dtype([('s', np.float64, (args.img_stack, 96, 96)), ('a', np.float64, (3,)), ('a_logp', np.float64),
                        ('r', np.float64), ('s_', np.float64, (args.img_stack, 96, 96)), ('die', np.int32), ('done', np.int32)])
 
