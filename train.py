@@ -21,8 +21,8 @@ parser.add_argument('--img-stack', type=int, default=4, metavar='N', help='stack
 parser.add_argument('--seed', type=int, default=0, metavar='N', help='random seed (default: 0)')
 parser.add_argument('--render', action='store_true', help='render the environment')
 parser.add_argument('--vis', action='store_true', help='use visdom')
-parser.add_argument(
-    '--log-interval', type=int, default=1, metavar='N', help='interval between training status logs (default: 1)')
+parser.add_argument('--log-interval', type=int, default=1, metavar='N', help='interval between training status logs (default: 1)')
+parser.add_argument('--load-weights', action='store_true', help='load pre-trained weights')
 args = parser.parse_args()
 
 use_cuda = torch.cuda.is_available()
@@ -51,8 +51,6 @@ class Env():
     def reset(self):
         self.counter = 0
         self.av_r = self.reward_memory()
-
-        self.die = False
         observation, _ = self.env.reset(seed=args.seed)
         self.stack = [np.array(observation)] * args.img_stack  # four frames for decision
         return np.array(self.stack)
@@ -146,7 +144,7 @@ class Agent():
     """
     max_grad_norm = 0.5
     clip_param = 0.1  # epsilon in clipped loss
-    ppo_epoch = 10
+    ppo_epoch = 5
     buffer_capacity = 2000
     batch_size = 128
     def __init__(self):
@@ -155,7 +153,7 @@ class Agent():
         self.buffer = np.empty(self.buffer_capacity, dtype=transition)
         self.counter = 0
 
-        self.optimizer = optim.Adam(self.net.parameters(), lr=1e-3)
+        self.optimizer = optim.Adam(self.net.parameters(), lr=1e-4) # starting lr was 1e-3
 
     def select_action(self, state):
         state = torch.from_numpy(state).double().to(device).unsqueeze(0)
@@ -169,8 +167,22 @@ class Agent():
         a_logp = a_logp.item()
         return action, a_logp
 
-    def save_param(self):
-        torch.save(self.net.state_dict(), f'param/params_max_ep_steps_{args.max_episode_steps}_action_repeat_{args.action_repeat}_img_stack_{args.img_stack}_lambda_{args.lambda_}_seed_{args.seed}.pkl')
+    def save_param(self, episode_num, score, running_score):
+        checkpoint = {
+                'model_state_dict': self.net.state_dict(),
+                'episode_num': episode_num,
+                'best_score': float(score),
+                'running_score': float(running_score)
+            }
+        torch.save(checkpoint, f'param/params_max_ep_steps_{args.max_episode_steps}_action_repeat_{args.action_repeat}_img_stack_{args.img_stack}_lambda_{args.lambda_}_seed_{args.seed}.pkl')
+
+    def load_param(self, path=None):
+        if path is None:
+            path = f'param/params_max_ep_steps_{args.max_episode_steps}_action_repeat_{args.action_repeat}_img_stack_{args.img_stack}_lambda_{args.lambda_}_seed_{args.seed}.pkl'
+        checkpoint = torch.load(path, map_location=device)
+        self.net.load_state_dict(checkpoint['model_state_dict'])
+        print(f'Loaded episode_num {checkpoint['episode_num']}      Best_score {checkpoint['best_score']}')
+        return checkpoint['episode_num'], checkpoint['best_score']
 
     def store(self, transition):
         self.buffer[self.counter] = transition
@@ -229,14 +241,19 @@ class Agent():
 if __name__ == "__main__":
     agent = Agent()
     env = Env()
+    episode_num = 0
+    running_score = 0
+    best_score = float('-inf')
+    best_running_score = float('-inf')
+    if args.load_weights:
+        episode_num, best_score = agent.load_param()
     if args.vis:
         draw_reward = DrawLine(env="car", title="PPO", xlabel="Episode", ylabel="Moving averaged episode reward")
 
     training_records = []
-    running_score = 0
-    best_running_score = float('-inf')
+    
     state = env.reset()
-    for i_ep in range(100000):
+    for i_ep in range(episode_num, 100000):
         score = 0
         state = env.reset()
 
@@ -255,7 +272,11 @@ if __name__ == "__main__":
         running_score = running_score * 0.99 + score * 0.01
         if running_score > best_running_score:
             best_running_score = running_score
-            agent.save_param()
+            
+        if score > best_score:
+            best_score = score
+            agent.save_param(i_ep, best_score, best_running_score)
+            print(f"New best score: {best_score}, saved model parameters.")
 
         if i_ep % args.log_interval == 0:
             if args.vis:

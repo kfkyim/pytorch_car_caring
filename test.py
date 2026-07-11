@@ -4,17 +4,19 @@ import numpy as np
 
 import gymnasium as gym
 from gymnasium.wrappers import GrayscaleObservation, NormalizeObservation
+#from train import Net
 import torch
 import torch.nn as nn
 
 parser = argparse.ArgumentParser(description='Test the PPO agent for the CarRacing-v0')
+parser.add_argument('--params-path', type=str, default=None, help='path to the saved model parameters')
 parser.add_argument('--max-episode-steps', type=int, default=1000, metavar='N', help='maximum number of steps in an episode (default: 1000)')
 parser.add_argument('--num-episodes', type=int, default=5, metavar='N', help='number of episodes to run (default: 5)')
 parser.add_argument('--action-repeat', type=int, default=8, metavar='N', help='repeat action in N frames (default: 8)')
 parser.add_argument('--img-stack', type=int, default=4, metavar='N', help='stack N image in a state (default: 4)')
 parser.add_argument('--seed', type=int, default=0, metavar='N', help='random seed (default: 0)')
 parser.add_argument('--render', action='store_true', help='render the environment')
-parser.add_argument('--params-path', type=str, default=None, help='path to the saved model parameters')
+
 args = parser.parse_args()
 
 use_cuda = torch.cuda.is_available()
@@ -78,7 +80,6 @@ class Env():
 
         return memory
 
-
 class Net(nn.Module):
     """
     Actor-Critic Network for PPO
@@ -122,8 +123,7 @@ class Net(nn.Module):
         beta = self.beta_head(x) + 1
 
         return (alpha, beta), v
-
-
+    
 class Agent():
     """
     Agent for testing
@@ -144,7 +144,8 @@ class Agent():
     def load_param(self, path=None):
         if path is None:
             path = 'param/ppo_net_params.pkl'
-        self.net.load_state_dict(torch.load(path, map_location=device))
+        checkpoint = torch.load(path, map_location=device)
+        self.net.load_state_dict(checkpoint['model_state_dict'])
 
 
 if __name__ == "__main__":
