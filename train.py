@@ -13,7 +13,7 @@ from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from utils import DrawLine
 
 parser = argparse.ArgumentParser(description='Train a PPO agent for the CarRacing-v0')
-parser.add_argument('--max_episode_steps', type=int, default=1000, metavar='N', help='maximum number of steps in an episode (default: 1000)')
+parser.add_argument('--max-episode-steps', type=int, default=1000, metavar='N', help='maximum number of steps in an episode (default: 1000)')
 parser.add_argument('--gamma', type=float, default=0.99, metavar='G', help='discount factor (default: 0.99)')
 parser.add_argument('--lambda_', type=float, default=0, metavar='G', help='GAE lambda factor (default: 0)')
 parser.add_argument('--action-repeat', type=int, default=8, metavar='N', help='repeat action in N frames (default: 8)')

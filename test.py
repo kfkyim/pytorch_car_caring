@@ -2,15 +2,19 @@ import argparse
 
 import numpy as np
 
-import gym
+import gymnasium as gym
+from gymnasium.wrappers import GrayscaleObservation, NormalizeObservation
 import torch
 import torch.nn as nn
 
 parser = argparse.ArgumentParser(description='Test the PPO agent for the CarRacing-v0')
-parser.add_argument('--action-repeat', type=int, default=8, metavar='N', help='repeat action in N frames (default: 12)')
+parser.add_argument('--max-episode-steps', type=int, default=1000, metavar='N', help='maximum number of steps in an episode (default: 1000)')
+parser.add_argument('--num-episodes', type=int, default=5, metavar='N', help='number of episodes to run (default: 5)')
+parser.add_argument('--action-repeat', type=int, default=8, metavar='N', help='repeat action in N frames (default: 8)')
 parser.add_argument('--img-stack', type=int, default=4, metavar='N', help='stack N image in a state (default: 4)')
 parser.add_argument('--seed', type=int, default=0, metavar='N', help='random seed (default: 0)')
 parser.add_argument('--render', action='store_true', help='render the environment')
+parser.add_argument('--params-path', type=str, default=None, help='path to the saved model parameters')
 args = parser.parse_args()
 
 use_cuda = torch.cuda.is_available()
@@ -26,51 +30,39 @@ class Env():
     """
 
     def __init__(self):
-        self.env = gym.make('CarRacing-v0')
-        self.env.seed(args.seed)
-        self.reward_threshold = self.env.spec.reward_threshold
+        self.env = NormalizeObservation(GrayscaleObservation(gym.make('CarRacing-v3', render_mode='human', continuous=True, max_episode_steps=args.max_episode_steps)))
+        spec = gym.spec('CarRacing-v3')
+        self.reward_threshold = spec.reward_threshold if spec.reward_threshold else float('inf')
 
     def reset(self):
         self.counter = 0
         self.av_r = self.reward_memory()
 
         self.die = False
-        img_rgb = self.env.reset()
-        img_gray = self.rgb2gray(img_rgb)
-        self.stack = [img_gray] * args.img_stack
+        observation, _ = self.env.reset(seed=args.seed)
+        self.stack = [np.array(observation)] * args.img_stack
         return np.array(self.stack)
 
     def step(self, action):
         total_reward = 0
         for i in range(args.action_repeat):
-            img_rgb, reward, die, _ = self.env.step(action)
+            observation, reward, die, trunc, _ = self.env.step(action)
+            reward = float(reward)
             # don't penalize "die state"
             if die:
                 reward += 100
-            # green penalty
-            if np.mean(img_rgb[:, :, 1]) > 185.0:
-                reward -= 0.05
             total_reward += reward
             # if no reward recently, end the episode
-            done = True if self.av_r(reward) <= -0.1 else False
+            done = True if self.av_r(reward) <= -0.1 or trunc else False
             if done or die:
                 break
-        img_gray = self.rgb2gray(img_rgb)
         self.stack.pop(0)
-        self.stack.append(img_gray)
+        self.stack.append(np.array(observation))
         assert len(self.stack) == args.img_stack
         return np.array(self.stack), total_reward, done, die
 
     def render(self, *arg):
         self.env.render(*arg)
-
-    @staticmethod
-    def rgb2gray(rgb, norm=True):
-        gray = np.dot(rgb[..., :], [0.299, 0.587, 0.114])
-        if norm:
-            # normalize
-            gray = gray / 128. - 1.
-        return gray
 
     @staticmethod
     def reward_memory():
@@ -118,7 +110,8 @@ class Net(nn.Module):
     def _weights_init(m):
         if isinstance(m, nn.Conv2d):
             nn.init.xavier_uniform_(m.weight, gain=nn.init.calculate_gain('relu'))
-            nn.init.constant_(m.bias, 0.1)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0.1)
 
     def forward(self, x):
         x = self.cnn_base(x)
@@ -137,10 +130,10 @@ class Agent():
     """
 
     def __init__(self):
-        self.net = Net().float().to(device)
+        self.net = Net().double().to(device)
 
     def select_action(self, state):
-        state = torch.from_numpy(state).float().to(device).unsqueeze(0)
+        state = torch.from_numpy(state).double().to(device).unsqueeze(0)
         with torch.no_grad():
             alpha, beta = self.net(state)[0]
         action = alpha / (alpha + beta)
@@ -148,23 +141,24 @@ class Agent():
         action = action.squeeze().cpu().numpy()
         return action
 
-    def load_param(self):
-        self.net.load_state_dict(torch.load('param/ppo_net_params.pkl'))
+    def load_param(self, path=None):
+        if path is None:
+            path = 'param/ppo_net_params.pkl'
+        self.net.load_state_dict(torch.load(path, map_location=device))
 
 
 if __name__ == "__main__":
     agent = Agent()
-    agent.load_param()
+    agent.load_param(args.params_path)
     env = Env()
 
-    training_records = []
     running_score = 0
     state = env.reset()
-    for i_ep in range(10):
+    for i_ep in range(args.num_episodes):
         score = 0
         state = env.reset()
 
-        for t in range(1000):
+        for t in range(args.max_episode_steps):
             action = agent.select_action(state)
             state_, reward, done, die = env.step(action * np.array([2., 1., 1.]) + np.array([-1., 0., 0.]))
             if args.render:
@@ -175,3 +169,4 @@ if __name__ == "__main__":
                 break
 
         print('Ep {}\tScore: {:.2f}\t'.format(i_ep, score))
+    env.env.close()
