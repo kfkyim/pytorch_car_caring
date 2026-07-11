@@ -170,7 +170,7 @@ class Agent():
         return action, a_logp
 
     def save_param(self):
-        torch.save(self.net.state_dict(), 'param/ppo_net_params_gae.pkl')
+        torch.save(self.net.state_dict(), f'param/params_max_ep_steps_{args.max_episode_steps}_action_repeat_{args.action_repeat}_img_stack_{args.img_stack}_lambda_{args.lambda_}_seed_{args.seed}.pkl')
 
     def store(self, transition):
         self.buffer[self.counter] = transition
@@ -234,6 +234,7 @@ if __name__ == "__main__":
 
     training_records = []
     running_score = 0
+    best_running_score = float('-inf')
     state = env.reset()
     for i_ep in range(100000):
         score = 0
@@ -252,12 +253,15 @@ if __name__ == "__main__":
             if done or die:
                 break
         running_score = running_score * 0.99 + score * 0.01
+        if running_score > best_running_score:
+            best_running_score = running_score
+            agent.save_param()
 
         if i_ep % args.log_interval == 0:
             if args.vis:
                 draw_reward(xdata=i_ep, ydata=running_score)
             print('Ep {}\tLast score: {:.2f}\tMoving average score: {:.2f}'.format(i_ep, score, running_score))
-            agent.save_param()
+
         if running_score > env.reward_threshold:
             print("Solved! Running reward is now {} and the last episode runs to {}!".format(running_score, score))
             break
