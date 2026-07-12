@@ -16,6 +16,7 @@ parser = argparse.ArgumentParser(description='Train a PPO agent for the CarRacin
 parser.add_argument('--max-episode-steps', type=int, default=1000, metavar='N', help='maximum number of steps in an episode (default: 1000)')
 parser.add_argument('--gamma', type=float, default=0.99, metavar='G', help='discount factor (default: 0.99)')
 parser.add_argument('--lambda_', type=float, default=0, metavar='G', help='GAE lambda factor (default: 0)')
+parser.add_argument('--lr', type=float, default=1e-4, metavar='G', help='learning rate of agent (default: 1e-4)')
 parser.add_argument('--action-repeat', type=int, default=8, metavar='N', help='repeat action in N frames (default: 8)')
 parser.add_argument('--img-stack', type=int, default=4, metavar='N', help='stack N image in a state (default: 4)')
 parser.add_argument('--seed', type=int, default=0, metavar='N', help='random seed (default: 0)')
@@ -181,8 +182,8 @@ class Agent():
             path = f'param/params_max_ep_steps_{args.max_episode_steps}_action_repeat_{args.action_repeat}_img_stack_{args.img_stack}_lambda_{args.lambda_}_seed_{args.seed}.pkl'
         checkpoint = torch.load(path, map_location=device)
         self.net.load_state_dict(checkpoint['model_state_dict'])
-        print(f'Loaded episode_num {checkpoint['episode_num']}      Best_score {checkpoint['best_score']:.2f}')
-        return checkpoint['episode_num'], checkpoint['best_score']
+        print(f'Loaded episode_num {checkpoint['episode_num']}      Best_score {checkpoint['best_score']:.2f}      Best_running_score {checkpoint['running_score']:.2f}')
+        return checkpoint['episode_num'], checkpoint['best_score'], checkpoint['running_score']
 
     def store(self, transition):
         self.buffer[self.counter] = transition
@@ -246,7 +247,8 @@ if __name__ == "__main__":
     best_score = float('-inf')
     best_running_score = float('-inf')
     if args.load_weights:
-        episode_num, best_score = agent.load_param()
+        episode_num, best_score, running_score = agent.load_param()
+        best_running_score = running_score
     if args.vis:
         draw_reward = DrawLine(env="car", title="PPO", xlabel="Episode", ylabel="Moving averaged episode reward")
 
