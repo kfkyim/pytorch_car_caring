@@ -136,7 +136,7 @@ class Agent():
         state = torch.from_numpy(state).double().to(device).unsqueeze(0)
         with torch.no_grad():
             alpha, beta = self.net(state)[0]
-        action = alpha / (alpha + beta)
+        action = alpha / (alpha + beta) # mean of beta distribution for greedy action.
 
         action = action.squeeze().cpu().numpy()
         return action
