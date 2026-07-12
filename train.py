@@ -181,7 +181,7 @@ class Agent():
             path = f'param/params_max_ep_steps_{args.max_episode_steps}_action_repeat_{args.action_repeat}_img_stack_{args.img_stack}_lambda_{args.lambda_}_seed_{args.seed}.pkl'
         checkpoint = torch.load(path, map_location=device)
         self.net.load_state_dict(checkpoint['model_state_dict'])
-        print(f'Loaded episode_num {checkpoint['episode_num']}      Best_score {checkpoint['best_score']}')
+        print(f'Loaded episode_num {checkpoint['episode_num']}      Best_score {checkpoint['best_score']:.2f}')
         return checkpoint['episode_num'], checkpoint['best_score']
 
     def store(self, transition):
@@ -272,11 +272,9 @@ if __name__ == "__main__":
         running_score = running_score * 0.99 + score * 0.01
         if running_score > best_running_score:
             best_running_score = running_score
-            
-        if score > best_score:
             best_score = score
-            agent.save_param(i_ep, best_score, best_running_score)
-            print(f"New best score: {best_score}, saved model parameters.")
+            agent.save_param(i_ep, score, best_running_score)
+            print(f"New best running score: {best_running_score:.2f}, saved model parameters.")
 
         if i_ep % args.log_interval == 0:
             if args.vis:
