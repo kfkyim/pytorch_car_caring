@@ -185,7 +185,7 @@ class Agent():
         checkpoint = torch.load(path, map_location=device)
         self.net.load_state_dict(checkpoint['model_state_dict'])
         print(f'Loaded episode_num {checkpoint['episode_num']}      Best_score {checkpoint['best_score']:.2f}      Best_running_score {checkpoint['running_score']:.2f}')
-        return checkpoint['episode_num'], checkpoint['best_score'], checkpoint['running_score'], 0#checkpoint['seed']
+        return checkpoint['episode_num'], checkpoint['best_score'], checkpoint['running_score'], checkpoint['seed']
 
     def store(self, transition):
         self.buffer[self.counter] = transition
@@ -278,9 +278,11 @@ if __name__ == "__main__":
             if done or die:
                 break
         running_score = running_score * 0.99 + score * 0.01
+        if score > best_score:
+            best_score = score
+
         if running_score > best_running_score:
             best_running_score = running_score
-            best_score = score
             agent.save_param(i_ep, score, best_running_score)
             print(f"New best running score: {best_running_score:.2f}, saved model parameters.\nBest score so far: {best_score:.2f}")
 
