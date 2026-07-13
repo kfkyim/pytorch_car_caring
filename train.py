@@ -14,6 +14,7 @@ from utils import DrawLine
 
 parser = argparse.ArgumentParser(description='Train a PPO agent for the CarRacing-v0')
 parser.add_argument('--max-episode-steps', type=int, default=1000, metavar='N', help='maximum number of steps in an episode (default: 1000)')
+parser.add_argument('--params-path', type=str, default=None, help='path to the saved model parameters')
 parser.add_argument('--gamma', type=float, default=0.99, metavar='G', help='discount factor (default: 0.99)')
 parser.add_argument('--lambda_', type=float, default=0, metavar='G', help='GAE lambda factor (default: 0)')
 parser.add_argument('--lr', type=float, default=1e-4, metavar='G', help='learning rate of agent (default: 1e-4)')
@@ -173,7 +174,8 @@ class Agent():
                 'model_state_dict': self.net.state_dict(),
                 'episode_num': episode_num,
                 'best_score': float(score),
-                'running_score': float(running_score)
+                'running_score': float(running_score),
+                'seed': float(args.seed)
             }
         torch.save(checkpoint, f'param/params_max_ep_steps_{args.max_episode_steps}_action_repeat_{args.action_repeat}_img_stack_{args.img_stack}_lambda_{args.lambda_}_seed_{args.seed}.pkl')
 
@@ -183,7 +185,7 @@ class Agent():
         checkpoint = torch.load(path, map_location=device)
         self.net.load_state_dict(checkpoint['model_state_dict'])
         print(f'Loaded episode_num {checkpoint['episode_num']}      Best_score {checkpoint['best_score']:.2f}      Best_running_score {checkpoint['running_score']:.2f}')
-        return checkpoint['episode_num'], checkpoint['best_score'], checkpoint['running_score']
+        return checkpoint['episode_num'], checkpoint['best_score'], checkpoint['running_score'], 0#checkpoint['seed']
 
     def store(self, transition):
         self.buffer[self.counter] = transition
@@ -247,8 +249,12 @@ if __name__ == "__main__":
     best_score = float('-inf')
     best_running_score = float('-inf')
     if args.load_weights:
-        episode_num, best_score, running_score = agent.load_param()
-        best_running_score = running_score
+        episode_num, best_score, loaded_running_score, loaded_seed = agent.load_param(args.params_path)
+        if loaded_seed != args.seed: 
+            print (f'Loaded seed {loaded_seed} is different from input seed {args.seed}. Restart running score.')
+        else:
+            best_running_score = loaded_running_score
+            running_score = loaded_running_score
     if args.vis:
         draw_reward = DrawLine(env="car", title="PPO", xlabel="Episode", ylabel="Moving averaged episode reward")
 
@@ -276,7 +282,7 @@ if __name__ == "__main__":
             best_running_score = running_score
             best_score = score
             agent.save_param(i_ep, score, best_running_score)
-            print(f"New best running score: {best_running_score:.2f}, saved model parameters.")
+            print(f"New best running score: {best_running_score:.2f}, saved model parameters.\nBest score so far: {best_score:.2f}")
 
         if i_ep % args.log_interval == 0:
             if args.vis:
